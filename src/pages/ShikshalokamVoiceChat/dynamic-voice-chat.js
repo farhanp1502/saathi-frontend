@@ -56,6 +56,15 @@ import { CHAT_SOURCE, CHAT_SPECIAL_IDS } from "constants/dynamic-chat"
 const PROFILE_FLOW = "saathi_profile"
 const SAATHI_PROFILE_BOT_ROUTE = "/saathi-profile"
 
+// Returns true when `msg` belongs to the given `flow`.
+// Tagged messages match only their own flow. Untagged (legacy) messages are
+// treated as main-flow data — they match every flow EXCEPT profile flows so
+// that old history never leaks into the profile popup.
+const msgBelongsToFlow = (msg, flow) => {
+  if (msg.flowType) return msg.flowType === flow
+  return flow !== PROFILE_FLOW
+}
+
 // Cached userData state from localStorage — populated lazily on first access,
 // cleared on logout. Bypasses Zustand hydration timing for auth token reads.
 let _userData = null
@@ -166,7 +175,18 @@ const DynamicVoiceChat = ({
   const setHasSelectedLanguage = useSiteDataSessionStore(state => state.setHasSelectedLanguage)
   const setStorageFlow = useChatStorage()(state => state.setFlow)
   const setStrandStep = useChatDataSessionStore(state => state.setStrandStep)
-  const showHomepage = useChatStorage()(state => state.showHomepage)
+  const showHomepageStore = useChatStorage()(state => state.showHomepage)
+  // In popup mode, use local state so the popup doesn't read/write the shared
+  // showHomepage flag that the main chat manages.
+  const [popupShowHomepage, setPopupShowHomepage] = useState(isPopupMode)
+  const showHomepage = isPopupMode ? popupShowHomepage : showHomepageStore
+  const updateShowHomepage = useCallback((value) => {
+    if (isPopupMode) {
+      setPopupShowHomepage(value)
+    } else {
+      setShowHomepage(value)
+    }
+  }, [isPopupMode])
   const ssoRerouteURL = useSiteStorage()(state => state.ssoRerouteURL)
   const stateMachineLength = useChatStorage()(state => state.stateMachineLength)
   const strandStep = useChatDataSessionStore(state => state.strandStep)
@@ -426,7 +446,7 @@ const DynamicVoiceChat = ({
   }, [])
 
   const onWebSocketOpen = useCallback(() => {
-    const chat_history = getChatHistory()
+    const chat_history = getChatHistory().filter(msg => msgBelongsToFlow(msg, storageFlow))
     if (chat_history.filter(chat => chat.source === "user").length < 1) return
     if (!flowInfo) return
 
@@ -453,7 +473,7 @@ const DynamicVoiceChat = ({
   const completeProfileExtraction = useCallback(() => {
     if (profileCompletedRef.current) return
     profileCompletedRef.current = true
-    setShowHomepage(false)
+    updateShowHomepage(false)
 
     // Stop TTS from re-playing earlier sentences (audio queue flush).
     setSentences(prev => prev.map(s => ({ ...s, isNarrated: true })))
@@ -468,6 +488,7 @@ const DynamicVoiceChat = ({
         source: "bot",
         updated_at: Date.now(),
         received: true,
+        flowType: storageFlow,
       },
     ])
     onProfileExtractedRef.current?.()
@@ -544,7 +565,7 @@ const DynamicVoiceChat = ({
       if (message.source === "user") {
         const chat_history = getChatHistory()
         const updated_chat_history = chat_history.map(chat => {
-          if (!chat.received && chat.msg === message.msg) {
+          if (!chat.received && chat.msg === message.msg && msgBelongsToFlow(chat, storageFlow)) {
             return { ...chat, received: true }
           }
 
@@ -582,7 +603,8 @@ const DynamicVoiceChat = ({
         // with identical text already exists in recent history.
         if (streamedMsg && !(isPopupMode && message?.extra_content?.profile_extracted === true)) {
           const currentHistory = getChatHistory()
-          const lastEntry = currentHistory[currentHistory.length - 1]
+          const flowHistory = currentHistory.filter(msg => msgBelongsToFlow(msg, storageFlow))
+          const lastEntry = flowHistory[flowHistory.length - 1]
           const isReplayDuplicate = lastEntry?.source === "bot" && lastEntry?.msg === streamedMsg.text
           if (!isReplayDuplicate) {
             const botMessage = createMessage({
@@ -590,6 +612,7 @@ const DynamicVoiceChat = ({
               source: "bot",
               received: true,
               updated_at: targetTempId,
+              flowType: storageFlow,
             })
             if (message?.extra_content) {
               botMessage.extra_content = message.extra_content
@@ -643,9 +666,21 @@ const DynamicVoiceChat = ({
 
   // ========== useMemo Hooks ==========
 
+  // Filter chat history to only show messages for the current flow type.
+  // Untagged (legacy) messages are treated as main-flow data and excluded
+  // from profile flows so old history never leaks into the profile popup.
+  const filteredChatHistory = useMemo(() => {
+    if (!storageFlow) return chatHistory
+    return chatHistory.filter(msg => msgBelongsToFlow(msg, storageFlow))
+  }, [chatHistory, storageFlow])
+
   const isInitialising = useMemo(() => {
-    return !sessionId || chatHistory?.length === 0
-  }, [sessionId, chatHistory])
+    // In popup mode, don't gate on filteredChatHistory — the popup fetches its
+    // own intro independently and the shared store may not have profile-flow
+    // messages yet.  We only need a sessionId to proceed.
+    if (isPopupMode) return !sessionId
+    return !sessionId || filteredChatHistory?.length === 0
+  }, [sessionId, filteredChatHistory, isPopupMode])
 
   const webSocketUrl = useMemo(() => {
     return `${env.WS_PROTOCOL()}://${env.WEBSOCKET_HOST()}/${flowInfo ? flowInfo.websocket_url : ""}`
@@ -691,11 +726,13 @@ const DynamicVoiceChat = ({
    * Creates and appends user message to conversation
    */
   const handleMessagesForUser = sentence => {
+    const currentHistory = getChatHistory()
     const chat_history = [
-      ...chatHistory,
+      ...currentHistory,
       createMessage({
         msg: sentence,
         source: "user",
+        flowType: storageFlow,
       }),
     ]
     setChatHistory(chat_history)
@@ -734,9 +771,12 @@ const DynamicVoiceChat = ({
    */
   const transformChatMessage = (chat, introMessage) => {
     // Skip intro message duplicates
-    if (chat?.id === "intro_msg_id" || chat?.message === introMessage) {
+    if (String(chat?.id).startsWith("intro_msg_id") || chat?.message === introMessage) {
       return null
     }
+
+
+
 
     // Use translated message if available
     const messageToUse = chat?.translated_message && chat?.translated_message !== "" ? chat?.translated_message : chat?.message
@@ -755,6 +795,7 @@ const DynamicVoiceChat = ({
         source: isBot ? "bot" : "user",
         updated_at: chat?.id,
         received: true,
+        flowType: storageFlow,
         thumbs_up: chat?.thumbs_up,
         thumbs_down: chat?.thumbs_down,
         ...(isBot && chat?.other_params?.extra_content != null ? {
@@ -820,7 +861,7 @@ const DynamicVoiceChat = ({
     setLlmError("")
     handleOnStopSpeaking()
 
-    setShowHomepage(false)
+    updateShowHomepage(false)
     setIsMute(true)
     if (audioRef.current) {
       audioRef.current.pause()
@@ -895,6 +936,15 @@ const DynamicVoiceChat = ({
    * Transforms and batches chat messages to avoid duplicates
    */
   const handleCompanyChatCall = useCallback(async () => {
+    // Profile onboarding popup is always a fresh conversation — never load
+    // DB history, which belongs to the main chat's session and cannot be
+    // distinguished by flow type.  The popup's conversation comes purely
+    // from the WebSocket intro message + live Q&A.
+    if (isPopupMode) {
+      if (accessToken) setIsLoading(false)
+      return
+    }
+
     try {
       // Use the Zustand getter so both the initial guard and the pre-write
       // guard read the live store value, not a stale closure snapshot.
@@ -903,7 +953,13 @@ const DynamicVoiceChat = ({
       // [companyBotData,introMessage,flowInfo] effect when introMessage
       // becomes truthy) from each independently passing the guard and
       // writing duplicate history.
-      if (getChatHistory().length >= 1) {
+      // Check only real messages (not intro) for the current flow so the
+      // profile popup can independently load its own chat history.
+      // Exclude intro messages — they are placeholders, not DB history.
+      const flowHistory = getChatHistory().filter(
+        msg => msgBelongsToFlow(msg, storageFlow) && !String(msg.updated_at).startsWith("intro_msg_id")
+      )
+      if (flowHistory.length >= 1) {
         return
       }
 
@@ -933,6 +989,7 @@ const DynamicVoiceChat = ({
             source: "bot",
             updated_at: "intro_msg_id",
             received: true,
+            flowType: storageFlow,
           })
         }
 
@@ -961,7 +1018,10 @@ const DynamicVoiceChat = ({
           // may have already written the history between our guard check
           // and this point.
           const currentHistory = getChatHistory()
-          if (currentHistory.length >= 1) return
+          const currentFlowHistory = currentHistory.filter(
+            msg => msgBelongsToFlow(msg, storageFlow) && !String(msg.updated_at).startsWith("intro_msg_id")
+          )
+          if (currentFlowHistory.length >= 1) return
           setChatHistory([...currentHistory, ...newChatHistoryItems])
           lastBotMessageIndex.current += newChatHistoryItems.length
         }
@@ -1016,14 +1076,21 @@ const DynamicVoiceChat = ({
   }, [storageFlow, isPopupMode])
 
   useEffect(() => {
-    if (chatHistory.length > 1) {
+    if (isPopupMode) {
+      // Popup manages its own homepage state locally.
+      if (filteredChatHistory.length > 1) {
+        setPopupShowHomepage(false)
+      }
+      return
+    }
+    if (filteredChatHistory.length > 1) {
       setShowHomepage(false)
       setIsOldChatOpen(true)
       setIsNewChatOpen(false)
     } else {
       setShowHomepage(true)
     }
-  }, [chatHistory])
+  }, [filteredChatHistory, isPopupMode])
 
   // ========================================================================
   // SECTION: Variable Definitions
@@ -1057,23 +1124,26 @@ const DynamicVoiceChat = ({
       words.splice(1, 0, firstName)
       message = words.join(" ")
     }
-    const isRestoringOldChat = isOldChatOpen && getChatHistory().length > 0
-    if (!isRestoringOldChat && message && !!message?.trim() && chatHistory[chatHistory?.length - 1]?.msg !== message && !sentences.some(msg => msg.message === message)) {
+    const isRestoringOldChat = isOldChatOpen && getChatHistory().filter(
+      msg => msgBelongsToFlow(msg, storageFlow) && !String(msg.updated_at).startsWith("intro_msg_id")
+    ).length > 0
+    // Use a flow-specific intro ID so each flow (main vs profile popup) gets its own entry.
+    const introId = isPopupMode ? `intro_msg_id_${storageFlow}` : "intro_msg_id"
+    if (!isRestoringOldChat && message && !!message?.trim() && filteredChatHistory[filteredChatHistory?.length - 1]?.msg !== message && !sentences.some(msg => msg.message === message)) {
       setIntroMessage(message)
       setSentences(prev => [
         ...prev,
         {
           message: message,
           isNarrated: false,
-          id: "intro_msg_id",
+          id: introId,
         },
       ])
-      // Add intro to chatHistory so isInitialising becomes false and the loader clears
       const currentHistory = getChatHistory()
-      if (!currentHistory.some(c => c.updated_at === "intro_msg_id")) {
-        setChatHistory([...currentHistory, { msg: message, source: "bot", updated_at: "intro_msg_id", received: true }])
+      if (!currentHistory.some(c => c.updated_at === introId)) {
+        setChatHistory([...currentHistory, { msg: message, source: "bot", updated_at: introId, received: true, flowType: storageFlow }])
       }
-      setHasOverRideId("intro_msg_id")
+      setHasOverRideId(introId)
       setIsMute(false)
       setIsNextAllowed(true)
     } else if (isRestoringOldChat && message) {
@@ -1177,7 +1247,8 @@ const DynamicVoiceChat = ({
    * Sets isNewChatOpen flag if chat history is present
    */
   useEffect(() => {
-    if (chatHistory?.length !== 0) {
+    if (isPopupMode) return
+    if (filteredChatHistory?.length !== 0) {
       setIsNewChatOpen(true)
     }
   }, [])
@@ -1259,11 +1330,16 @@ const DynamicVoiceChat = ({
     if (!chatLanguage || !storageFlow) return
     setLanguage(chatLanguage)
 
-    if (getChatHistory().length > 0) return
+    // Check only messages for the current flow, so the profile popup
+    // still fetches its own intro even when the main chat has history.
+    // Exclude intro placeholder messages — they don't represent real conversation state.
+    const flowHistory = getChatHistory().filter(
+      msg => msgBelongsToFlow(msg, storageFlow) && !String(msg.updated_at).startsWith("intro_msg_id")
+    )
+    if (flowHistory.length > 0) return
 
     stopAllAudio()
     isIntroPlayed.current = false
-    setChatHistory([])
     setSentences([])
     setAudioCache({})
     setShouldFetchIntro(true)
@@ -1278,26 +1354,35 @@ const DynamicVoiceChat = ({
       if (isOldChatOpen === true) {
         setShouldFetchIntro(true)
         // Only hide homepage if there are real conversation messages beyond the intro
-        const history = getChatHistory()
-        const hasRealMessages = history.some(c => c.updated_at !== "intro_msg_id")
-        setShowHomepage(!hasRealMessages)
+        // for the active flow — prevents messages from other flows from toggling state.
+        const hasRealMessages = filteredChatHistory.some(c => !String(c.updated_at).startsWith("intro_msg_id"))
+        if (isPopupMode) {
+          setPopupShowHomepage(!hasRealMessages)
+        } else {
+          setShowHomepage(!hasRealMessages)
+        }
       } else if (isNewChatOpen === true) {
-        setShowHomepage(true)
+        if (isPopupMode) {
+          setPopupShowHomepage(true)
+        } else {
+          setShowHomepage(true)
+        }
       }
     } else {
       removeChatHistory()
     }
-  }, [isOldChatOpen, isNewChatOpen])
+  }, [isOldChatOpen, isNewChatOpen, filteredChatHistory, isPopupMode])
 
   /**
    * Fetch chat session when old chat is opened
    * Loads existing conversation when user selects from history
    */
   useEffect(() => {
-    if (isOldChatOpen === true && introMessage && chatHistory?.length === 0 && sentences?.length === 0) {
+    const realMessages = filteredChatHistory?.filter(c => !String(c.updated_at).startsWith("intro_msg_id")) ?? []
+    if (isOldChatOpen === true && introMessage && realMessages.length === 0 && sentences?.length === 0) {
       handleChatSessionButtonClick()
     }
-  }, [isOldChatOpen, introMessage, chatHistory, sentences])
+  }, [isOldChatOpen, introMessage, filteredChatHistory, sentences])
 
   const hasScrolledToBottomRef = useRef(false)
   useEffect(() => {
@@ -1306,12 +1391,12 @@ const DynamicVoiceChat = ({
     setActiveSources([])
   }, [sessionId])
   useEffect(() => {
-    if (isOldChatOpen === true && chatHistory?.length > 0 && !hasScrolledToBottomRef.current) {
+    if (isOldChatOpen === true && filteredChatHistory?.length > 0 && !hasScrolledToBottomRef.current) {
       hasScrolledToBottomRef.current = true
       const scrollTimer = setTimeout(() => handleScrollToView(), 100)
       return () => clearTimeout(scrollTimer)
     }
-  }, [isOldChatOpen, chatHistory])
+  }, [isOldChatOpen, filteredChatHistory])
 
   /**
    * Load chat history sidebar sessions when profile and flow are ready
@@ -1390,26 +1475,30 @@ const DynamicVoiceChat = ({
    * Keeps track of last bot message and scrolls to latest message
    */
   useEffect(() => {
-    lastBotMessageIndex.current = chatHistory?.length - 1
+    lastBotMessageIndex.current = filteredChatHistory?.length - 1
     if (!(isOldChatOpen && !hasScrolledToBottomRef.current)) handleScrollToView()
-  }, [chatHistory])
+  }, [filteredChatHistory])
 
   /**
    * Attach audio recordings to user messages in chat history
    * Updates latest user message with voice recording data
    */
   useEffect(() => {
-    const lastMsg = chatHistory[chatHistory?.length - 1]
+    const lastMsg = filteredChatHistory[filteredChatHistory?.length - 1]
     if (!!recordings?.length && lastMsg?.source !== "bot") {
       const updatedChatHistory = [...chatHistory]
-      updatedChatHistory[chatHistory?.length - 1] = {
-        ...updatedChatHistory[chatHistory?.length - 1],
-        recording: recordings[recordings?.length - 1],
+      // Find the index of the last filtered message in the full chatHistory
+      const fullIndex = chatHistory.lastIndexOf(lastMsg)
+      if (fullIndex !== -1) {
+        updatedChatHistory[fullIndex] = {
+          ...updatedChatHistory[fullIndex],
+          recording: recordings[recordings?.length - 1],
+        }
       }
       setChatHistory(updatedChatHistory)
     }
     return () => {}
-  }, [recordings, chatHistory])
+  }, [recordings, filteredChatHistory])
 
 
   // ========================================================================
@@ -1448,14 +1537,14 @@ const DynamicVoiceChat = ({
       const currentFlow = storageFlow
 
       if (currentFlow) {
-        if (chatHistory.length > 0) {
-          if (isStreamingComplete && chatHistory[chatHistory.length - 1]?.source === "bot") {
+        if (filteredChatHistory.length > 0) {
+          if (isStreamingComplete && filteredChatHistory[filteredChatHistory.length - 1]?.source === "bot") {
             shouldPlay = true
           }
         } else {
           shouldPlay = true
         }
-      } else if (chatHistory && chatHistory.length > 0 && chatHistory[chatHistory.length - 1]?.source === "bot" && !isIntroMessageLoading && !isLoading) {
+      } else if (filteredChatHistory && filteredChatHistory.length > 0 && filteredChatHistory[filteredChatHistory.length - 1]?.source === "bot" && !isIntroMessageLoading && !isLoading) {
         shouldPlay = true
       }
     }
@@ -1467,7 +1556,7 @@ const DynamicVoiceChat = ({
         lastSpeakerButton.click()
       }
     }
-  }, [isStreamingComplete, showHomepage, isLoading, chatHistory, isMute, isIntroMessageLoading, speakerEnabled])
+  }, [isStreamingComplete, showHomepage, isLoading, filteredChatHistory, isMute, isIntroMessageLoading, speakerEnabled])
 
   /**
    * Process TTS requests for unnarrated bot messages
@@ -1555,7 +1644,7 @@ const DynamicVoiceChat = ({
     setSessionId(session.sessionid)
 
 
-    setShowHomepage(true)
+    updateShowHomepage(true)
     setIsLoading(false)
 
     if (!isPopupMode) {
@@ -1629,7 +1718,7 @@ const DynamicVoiceChat = ({
       // Skip autoplay TTS if browser blocked it; manual speaker clicks (hasOverRideId) still proceed
       if (ttsDisabledRef.current && !hasOverRideId) return
 
-      if (id === "intro_msg_id") {
+      if (String(id).startsWith("intro_msg_id")) {
         setSentences(prev => prev.map(x => ({ ...x, isNarrated: true })))
         setIsNextAllowed(true)
         setHasOverRideId(null)
@@ -1742,12 +1831,12 @@ const DynamicVoiceChat = ({
       } catch (error) {
         console.error({ error })
       }
-      if (id === "intro_msg_id") {
+      if (String(id).startsWith("intro_msg_id")) {
         isIntroPlayed.current = false
       }
       setHasOverRideId(id)
       setIsNextAllowed(true)
-      const messageToPlay = staticMsg ? staticMsg : chatHistory.find(message => message.updated_at === id)
+      const messageToPlay = staticMsg ? staticMsg : filteredChatHistory.find(message => message.updated_at === id)
       setSentences(() => [
         {
           message: messageToPlay?.msg,
@@ -2209,7 +2298,7 @@ const DynamicVoiceChat = ({
           </div>
         )}
       {(isInitialising || isLoading || (!introMessageData && !introMessage)) && (
-        <div className="loader-load-spinner">
+        <div className={isPopupMode ? undefined : "loader-load-spinner"} style={isPopupMode ? { display: "flex", justifyContent: "center", alignItems: "center", width: "100%", flex: 1 } : undefined}>
           <div className="div67">
             <BiLoader className="loader-rotate-loader loader-icon" />
           </div>
@@ -2220,8 +2309,8 @@ const DynamicVoiceChat = ({
         <div className={`${accessToken ? "div33-a" : "div33"} div9`} style={hasActiveFlexLayout ? { flex: 1, overflowY: "auto", minHeight: 0, paddingTop: 0, paddingBottom: 0 } : undefined}>
           {!showHomepage && (
             <ul className="div34">
-              {chatHistory &&
-                chatHistory?.filter(chat => chat.updated_at !== "intro_msg_id")?.map((chat, i) => (
+              {filteredChatHistory &&
+                filteredChatHistory?.filter(chat => !String(chat.updated_at).startsWith("intro_msg_id"))?.map((chat, i) => (
                   <li key={i} className={`div34 div35 label1`}>
                     <div className={`div36 ${chat?.source === "user" && "div37"}`}>
                       <ChatMessage
@@ -2232,7 +2321,7 @@ const DynamicVoiceChat = ({
                         recording={chat?.recording}
                         hasAppendix={chat?.recording}
                         appendixURL={chat?.appendixURL}
-                        isTalking={chat.source === "bot" && !isStreamingComplete && i === chatHistory.length - 1}
+                        isTalking={chat.source === "bot" && !isStreamingComplete && i === filteredChatHistory.filter(c => !String(c.updated_at).startsWith("intro_msg_id")).length - 1}
                         handleOnStopSpeaking={() => handleOnStopSpeaking()}
                         handleOnSpeaking={() => {
                           handleOnSpeaking(chat?.msg, chat?.updated_at)
@@ -2308,7 +2397,7 @@ const DynamicVoiceChat = ({
                         companyChatId={chat.updated_at}
                         sessionId={sessionId}
                         sources={chat?.extra_content?.sources || []}
-                        isStreaming={!isStreamingComplete && i === chatHistory.length - 1}
+                        isStreaming={!isStreamingComplete && i === filteredChatHistory.filter(c => !String(c.updated_at).startsWith("intro_msg_id")).length - 1}
                         isMobile={isMobile}
                         accessToken={accessToken}
                         activeSourcesChatId={activeSourcesChatId}
@@ -2330,7 +2419,7 @@ const DynamicVoiceChat = ({
             </ul>
           )}
           {!showHomepage && (() => {
-            const filteredHistory = chatHistory?.filter(chat => chat.updated_at !== "intro_msg_id") ?? []
+            const filteredHistory = filteredChatHistory?.filter(chat => !String(chat.updated_at).startsWith("intro_msg_id")) ?? []
             const lastChat = filteredHistory[filteredHistory.length - 1]
             return lastChat?.source === "user" ? (
               <div className="replying-indicator" role="status" aria-live="polite">
@@ -2380,39 +2469,45 @@ const DynamicVoiceChat = ({
                   )
                 })()}
 
-              {chatHistory?.length > 0 && chatHistory[0]?.updated_at !== "intro_msg_id" && chatHistory[0]?.msg !== introMessage && (
-                <div className="div26">
-                  <div className="div36 div12">
-                    <ChatMessage
-                      botNameToDisplay={botNameToDisplay}
-                      userType={chatHistory[0]?.source}
-                      message={`${chatHistory[0]?.msg}`}
-                      name={t("userName")}
-                      recording={chatHistory[0]?.recording}
-                      hasAppendix={chatHistory[0]?.recording}
-                      appendixURL={chatHistory[0]?.appendixURL}
-                      isTalking={false}
-                      handleOnStopSpeaking={() => handleOnStopSpeaking()}
-                      handleOnSpeaking={() => {
-                        handleOnSpeaking(chatHistory[0]?.msg, chatHistory[0]?.updated_at)
-                      }}
-                      isAnyPlaying={!!hasOverRideId || isTalking}
-                      isPlaying={hasOverRideId === chatHistory[0]?.updated_at}
-                      isStreamingComplete={isStreamingComplete}
-                      setNotMute={setIsMute}
-                      setSpeakerEnabled={setSpeakerEnabled}
-                      chatId={chatHistory[0]?.updated_at}
-                    />
+              {(() => {
+                const firstBotQuestion = filteredChatHistory?.find(
+                  c => c?.source === "bot" && !String(c.updated_at).startsWith("intro_msg_id") && c?.msg !== introMessage
+                )
+                if (!firstBotQuestion) return null
+                return (
+                  <div className="div26">
+                    <div className="div36 div12">
+                      <ChatMessage
+                        botNameToDisplay={botNameToDisplay}
+                        userType={firstBotQuestion.source}
+                        message={`${firstBotQuestion.msg}`}
+                        name={t("userName")}
+                        recording={firstBotQuestion.recording}
+                        hasAppendix={firstBotQuestion.recording}
+                        appendixURL={firstBotQuestion.appendixURL}
+                        isTalking={false}
+                        handleOnStopSpeaking={() => handleOnStopSpeaking()}
+                        handleOnSpeaking={() => {
+                          handleOnSpeaking(firstBotQuestion.msg, firstBotQuestion.updated_at)
+                        }}
+                        isAnyPlaying={!!hasOverRideId || isTalking}
+                        isPlaying={hasOverRideId === firstBotQuestion.updated_at}
+                        isStreamingComplete={isStreamingComplete}
+                        setNotMute={setIsMute}
+                        setSpeakerEnabled={setSpeakerEnabled}
+                        chatId={firstBotQuestion.updated_at}
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
             </>
           )}
           <div id="last-chat-boundary" className="div38" />
         </div>
         <Notification />
 
-        {!isLoading && (llmError === "" || !llmError) && Array.isArray(chatHistory) && chatHistory.some(item => item && Object.keys(item).length > 0) && (
+        {!isLoading && (llmError === "" || !llmError) && (isPopupMode || (Array.isArray(filteredChatHistory) && filteredChatHistory.some(item => item && Object.keys(item).length > 0))) && (
           <form
             className="form-1 flex flex-col"
             style={hasActiveFlexLayout ? { position: "relative", bottom: "auto", left: "auto", width: "100%", flexShrink: 0, zIndex: "auto" } : undefined}
@@ -2432,7 +2527,7 @@ const DynamicVoiceChat = ({
                      message in history IS a bot message with chips (i.e. bot was waiting for reply) */}
             {(() => {
               let lastBotMsg
-              const history = chatHistory ?? []
+              const history = filteredChatHistory ?? []
 
               if (isSocketConnected) {
                 // Live session: show chips once streaming has finished

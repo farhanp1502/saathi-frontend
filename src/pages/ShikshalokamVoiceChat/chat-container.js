@@ -53,6 +53,11 @@ function ChatContainer() {
 
   useEffect(() => {
     const chat_history = getChatHistory()
+    // Remove unreceived messages on mount (e.g. messages sent right before
+    // a page reload that were never echoed back by the server).
+    // Profile-onboarding messages (saathi_profile) are preserved here so
+    // they survive language changes and navigation during the popup session.
+    // They are only cleared in handleProfilePopupClose once onboarding completes.
     const updated_chat_history = chat_history.filter(chat => chat.received)
     setChatHistory(updated_chat_history)
   }, [])
@@ -76,6 +81,13 @@ function ChatContainer() {
   }, [accessToken, profileId])
 
   const handleProfilePopupClose = useCallback(async () => {
+    // 1. Hide the popup first — this unmounts the popup's DynamicVoiceChat
+    //    and changes the main DVC's key, causing it to remount fresh.
+    setShowProfilePopup(false)
+
+    // 2. Now clear the store — no other DVC instance is mounted to write back.
+    //    Use a microtask to ensure React has processed the unmount.
+    await Promise.resolve()
     const store = useChatDataLocalStore.getState()
     store.setIsOldChatOpen(false)
     store.setIsNewChatOpen(true)
@@ -90,8 +102,6 @@ function ChatContainer() {
       store.setSessionId(session.sessionid)
     } catch (error) {
       console.error("[handleProfilePopupClose] getSessionDetails failed:", error)
-    } finally {
-      setShowProfilePopup(false)
     }
   }, [])
 
