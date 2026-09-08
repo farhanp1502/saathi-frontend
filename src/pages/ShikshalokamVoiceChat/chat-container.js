@@ -30,6 +30,8 @@ function ChatContainer() {
 
   const [isLoading, setIsLoading] = useState(false)
   const [showProfilePopup, setShowProfilePopup] = useState(false)
+  const [profileCheckDone, setProfileCheckDone] = useState(false)
+  const [profileSessionId, setProfileSessionId] = useState(null)
 
   const chatLanguage = useSiteDataSessionStore(state => state.chatLanguage)
   const ipFetched = useUserStorage()(state => state.ipFetched)
@@ -64,18 +66,33 @@ function ChatContainer() {
 
   // Check if profile onboarding is needed
   useEffect(() => {
-    if (!accessToken || !profileId) return
+    setProfileCheckDone(false)
+    if (!accessToken || !profileId) {
+      setProfileCheckDone(true)
+      return
+    }
     const acceptedTnC = useUserDataLocalStore.getState().has_accepted_tnc
-    if (acceptedTnC !== true) return
+    if (acceptedTnC !== true) {
+      setProfileCheckDone(true)
+      return
+    }
 
     ;(async () => {
       try {
         const data = await getProfileApi(profileId, accessToken)
         if (data?.is_profile_complete === false) {
+          try {
+            const profileSession = await getSessionDetails()
+            setProfileSessionId(profileSession.sessionid)
+          } catch (err) {
+            console.error("[ChatContainer] profile session fetch failed:", err)
+          }
           setShowProfilePopup(true)
         }
       } catch (error) {
         console.error("[ChatContainer] profile check failed:", error)
+      } finally {
+        setProfileCheckDone(true)
       }
     })()
   }, [accessToken, profileId])
@@ -84,6 +101,7 @@ function ChatContainer() {
     // 1. Hide the popup first — this unmounts the popup's DynamicVoiceChat
     //    and changes the main DVC's key, causing it to remount fresh.
     setShowProfilePopup(false)
+    setProfileSessionId(null)
 
     // 2. Now clear the store — no other DVC instance is mounted to write back.
     //    Use a microtask to ensure React has processed the unmount.
@@ -146,12 +164,12 @@ function ChatContainer() {
   return (
     <>
       <div style={showProfilePopup ? { filter: "blur(10px)", pointerEvents: "none", position: "fixed", inset: 0, overflow: "hidden" } : undefined}>
-        {accessToken && !isLoading && <DynamicVoiceChat key={showProfilePopup ? "onboarding" : "main"} />}
+        {accessToken && !isLoading && profileCheckDone && <DynamicVoiceChat key={showProfilePopup ? "onboarding" : "main"} />}
       </div>
       {showProfilePopup && (
-        <ProfileChatPopup isOpen={showProfilePopup} onClose={handleProfilePopupClose} />
+        <ProfileChatPopup isOpen={showProfilePopup} onClose={handleProfilePopupClose} sessionId={profileSessionId} />
       )}
-      {(isLoading || !ipFetched) && (
+      {!showProfilePopup && (isLoading || !ipFetched || !profileCheckDone) && (
         <div className="loader-load-spinner">
           <div className="div67">
             <BiLoader className="loader-rotate-loader loader-icon" />

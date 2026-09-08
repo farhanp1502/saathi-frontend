@@ -4,9 +4,8 @@ import DynamicVoiceChat from "../../pages/ShikshalokamVoiceChat/dynamic-voice-ch
 import "../TnC/privacyPolicyPopup.css"
 import env from "../../utils/env"
 
-const PROFILE_FLOW = "saathi_profile"
 
-function ProfileChatPopup({ isOpen, onClose }) {
+function ProfileChatPopup({ isOpen, onClose, sessionId }) {
   const timerRef = useRef(null)
 
   useEffect(() => {
@@ -61,9 +60,10 @@ function ProfileChatPopup({ isOpen, onClose }) {
           }}
         >
           <DynamicVoiceChat
-            flowOverride={PROFILE_FLOW}
+            flowOverride={env.PROFILE_FLOW_NAME()}
             isPopupMode={true}
             onProfileExtracted={handleProfileExtracted}
+            sessionOverride={sessionId}
           />
         </div>
       </div>
@@ -74,6 +74,7 @@ function ProfileChatPopup({ isOpen, onClose }) {
 ProfileChatPopup.propTypes = {
   isOpen: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
+  sessionId: PropTypes.string,
 }
 
 export default ProfileChatPopup

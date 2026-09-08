@@ -53,8 +53,6 @@ import WaveSurferPlayer from "../interview-text-voice/voice-player"
 import { CHAT_SOURCE, CHAT_SPECIAL_IDS } from "constants/dynamic-chat"
 
 
-const PROFILE_FLOW = "saathi_profile"
-const SAATHI_PROFILE_BOT_ROUTE = "/saathi-profile"
 
 // Returns true when `msg` belongs to the given `flow`.
 // Tagged messages match only their own flow. Untagged (legacy) messages are
@@ -62,7 +60,7 @@ const SAATHI_PROFILE_BOT_ROUTE = "/saathi-profile"
 // that old history never leaks into the profile popup.
 const msgBelongsToFlow = (msg, flow) => {
   if (msg.flowType) return msg.flowType === flow
-  return flow !== PROFILE_FLOW
+  return flow !== env.PROFILE_FLOW_NAME()
 }
 
 // Cached userData state from localStorage — populated lazily on first access,
@@ -95,9 +93,10 @@ const DynamicVoiceChat = ({
   flowOverride = null,
   isPopupMode = false,
   onProfileExtracted,
+  sessionOverride = null,
 }) => {
   const storageFlow = flowOverride || env.FLOW_NAME()
-  const showHistorySidebar = !!(storageFlow && storageFlow !== PROFILE_FLOW)
+  const showHistorySidebar = !!(storageFlow && storageFlow !== env.PROFILE_FLOW_NAME())
 
   // ========== useState Hooks ==========
   const [asrAudio, setAsrAudio] = useState(null)
@@ -170,7 +169,8 @@ const DynamicVoiceChat = ({
   const preferredLanguage = useUserStorage()(state => state.preferredLanguage)
   const previousUrl = useSiteStorage()(state => state.previousUrl)
   const profileToUse = useUserStorage()(state => state.profileId)
-  const sessionId = useChatStorage()(state => state.sessionId)
+  const storeSessionId = useChatStorage()(state => state.sessionId)
+  const sessionId = sessionOverride || storeSessionId
   const setChatLanguage = useSiteDataSessionStore(state => state.setChatLanguage)
   const setHasSelectedLanguage = useSiteDataSessionStore(state => state.setHasSelectedLanguage)
   const setStorageFlow = useChatStorage()(state => state.setFlow)
@@ -260,6 +260,7 @@ const DynamicVoiceChat = ({
     }
   }, [isOffline]) // eslint-disable-line react-hooks/exhaustive-deps
 
+
   // ========== react query hooks ==========
   const {
     data: flowInfo,
@@ -275,8 +276,8 @@ const DynamicVoiceChat = ({
   })
 
   const botRoute = useMemo(() => {
-    if (flowOverride === PROFILE_FLOW) {
-      return SAATHI_PROFILE_BOT_ROUTE
+    if (flowOverride === env.PROFILE_FLOW_NAME()) {
+      return env.PROFILE_BOT_ROUTE()
     }
   
     return flowInfo?.bot_route
@@ -2092,7 +2093,7 @@ const DynamicVoiceChat = ({
     let localTitles = {}
     try { localTitles = JSON.parse(localStorage.getItem("__session_titles") || "{}") } catch {}
     const items = results
-      .filter(sessionObj => !sessionTypeFilter || sessionObj.session_type === sessionTypeFilter)
+      .filter(sessionObj => sessionObj.session_type !== env.PROFILE_FLOW_NAME() && (!sessionTypeFilter || sessionObj.session_type === sessionTypeFilter))
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
       .map(sessionObj => {
         const title = sessionObj.title || localTitles[sessionObj.session] || null
@@ -2161,11 +2162,6 @@ const DynamicVoiceChat = ({
 
   return (
     <>
-      {accessToken && !isTokenValidated && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-[#faf6fb]">
-          <BiLoader className="loader-rotate-loader text-4xl text-[#572e91]" />
-        </div>
-      )}
       <div style={hasActiveFlexLayout ? { display: "flex", flexDirection: "row", height: isPopupMode ? "100%" : "100dvh", overflow: "hidden", position: "relative" } : undefined}>      {/* ===== CHAT HISTORY SIDEBAR (popup mode, non-profile flows) ===== */}
       {showHistorySidebar && (
         <>
@@ -2297,7 +2293,7 @@ const DynamicVoiceChat = ({
             </div>
           </div>
         )}
-      {(isInitialising || isLoading || (!introMessageData && !introMessage)) && (
+      {!isPopupMode && (isInitialising || isLoading || (!introMessageData && !introMessage) || (accessToken && !isTokenValidated)) && (
         <div className={isPopupMode ? undefined : "loader-load-spinner"} style={isPopupMode ? { display: "flex", justifyContent: "center", alignItems: "center", width: "100%", flex: 1 } : undefined}>
           <div className="div67">
             <BiLoader className="loader-rotate-loader loader-icon" />
@@ -2456,11 +2452,11 @@ const DynamicVoiceChat = ({
                         <p style={{ textAlign: "center", lineHeight: "1.8" }}>
                           {t(`${prefix}homepageList`)}
                           <br />
-                          {isPopupMode || storageFlow === "saathi_profile"
+                          {isPopupMode || storageFlow === env.PROFILE_FLOW_NAME()
                             ? t("profileHomepageList1")
                             : t(`${prefix}homepageList1`)}
                           <br />
-                          {isPopupMode || storageFlow === "saathi_profile"
+                          {isPopupMode || storageFlow === env.PROFILE_FLOW_NAME()
                             ? t("profileHomepageList2")
                             : t(`${prefix}homepageList2`)}
                         </p>

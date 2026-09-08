@@ -50,6 +50,8 @@ export const env = {
   LOGIN_REDIRECT_URL: () => getEnv("REACT_APP_LOGIN_REDIRECT_URL", ""),
   REDIRECT_URL_PATH: () => getEnv("REACT_APP_REDIRECT_URL_PATH", ""),
   FLOW_NAME: () => getEnv("REACT_APP_FLOW_NAME", ""),
+  PROFILE_FLOW_NAME: () => getEnv("REACT_APP_PROFILE_FLOW_NAME", "saathi_profile"),
+  PROFILE_BOT_ROUTE: () => getEnv("REACT_APP_PROFILE_BOT_ROUTE", "/saathi-profile"),
 
   // WebSocket error source identifier
   WS_ERROR_SOURCE: () => getEnv("REACT_APP_WS_ERROR_SOURCE", "system"),
