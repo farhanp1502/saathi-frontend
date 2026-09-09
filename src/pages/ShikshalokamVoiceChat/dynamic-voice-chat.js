@@ -137,6 +137,12 @@ const DynamicVoiceChat = ({
   const [sidebarNextPageUrl, setSidebarNextPageUrl] = useState(null)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const showProfileModal = useProfileModalStore(state => state.showProfileModal)
+
+  useEffect(() => {
+    return () => {
+      setShowProfileModal(false)
+    }
+  }, [])
   const [profileApiData, setProfileApiData] = useState({})
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false)
   const [isTokenValidated, setIsTokenValidated] = useState(false)
@@ -1995,7 +2001,11 @@ const DynamicVoiceChat = ({
 
   async function handleSaveProfile(formValues) {
     try {
-      await validateToken()
+      const isValidSession = await validateToken()
+      if (!isValidSession) {
+        setShowProfileModal(false)
+        return
+      }
     } catch (error) {
       setShowProfileModal(false)
       console.error("Session validation failed before profile update:", error)
