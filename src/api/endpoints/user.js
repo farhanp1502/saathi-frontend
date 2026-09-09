@@ -6,6 +6,7 @@ import i18n from "i18next"
 import ROUTES from "../../url"
 import { clearFromStorage } from "../../services/storage_service"
 import useUserDataLocalStore from "../../store/slices/userData/userDataLocal"
+import { setShowProfileModal } from "utils/profileModal"
 
 export const getProfileApi = async (profileId, accessToken) => {
   try {
@@ -74,6 +75,7 @@ export const readElevateProfileApi = async (accessToken, { silent = false } = {}
       }
       if (_sessionInvalidPopupShown) return
       _sessionInvalidPopupShown = true
+      setShowProfileModal(false)
       await Swal.fire({
         text: i18n.t("sessionExpiredMessage"),
         confirmButtonText: i18n.t("confirmChanges"),

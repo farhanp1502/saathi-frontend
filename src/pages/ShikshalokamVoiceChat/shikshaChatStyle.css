@@ -1625,27 +1625,14 @@ html, body {
 }
 
 .msg-action-logo {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   object-fit: contain;
   flex-shrink: 0;
-  border-radius: 50%;
-  border: 1.5px solid #ffffff;
-  background: #ffffff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
-  transition: border-color 0.15s ease;
 }
 
 .msg-action-logos-container .msg-action-logo:nth-child(n+2) {
-  margin-left: -9px; /* 50% overlap */
-}
-
-.msg-action-btn:hover .msg-action-logo {
-  border-color: #f3f4f6;
-}
-
-.msg-action-btn--active .msg-action-logo {
-  border-color: #f0f0ff;
+  margin-left: -11px; /* 50% overlap */
 }
 
 .msg-action-btn:hover {

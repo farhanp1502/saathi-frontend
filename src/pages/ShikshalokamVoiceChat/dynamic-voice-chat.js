@@ -11,7 +11,7 @@ import { getChatsFromDB, getAI4BharatAudioApi, ai4BharatASRApi, getFlowInfoApi }
 import { FaCircle } from "react-icons/fa6"
 import { FaMicrophone, FaRegStopCircle } from "react-icons/fa"
 import { FiDownload, FiLogOut, FiPlus } from "react-icons/fi"
-import UserProfileModal from "components/UserProfileModal"
+import UserProfileModal, { useProfileModalStore, setShowProfileModal } from "components/UserProfileModal"
 import MessageActionBar from "components/MessageActionBar"
 import SourcesPanel from "components/SourcesPanel"
 import { PROFILE_FORM_SCHEMA, PROFILE_MODAL_CONFIG, extractUserProfileData } from "constants/profileForm"
@@ -136,7 +136,7 @@ const DynamicVoiceChat = ({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [sidebarNextPageUrl, setSidebarNextPageUrl] = useState(null)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
-  const [showProfileModal, setShowProfileModal] = useState(false)
+  const showProfileModal = useProfileModalStore(state => state.showProfileModal)
   const [profileApiData, setProfileApiData] = useState({})
   const [isLoadingMoreSessions, setIsLoadingMoreSessions] = useState(false)
   const [isTokenValidated, setIsTokenValidated] = useState(false)
@@ -393,6 +393,7 @@ const DynamicVoiceChat = ({
   const resetIntentionalCloseRef = useRef(() => {})
 
   const onFinalReconnectAttempt = useCallback(async () => {
+    setShowProfileModal(false)
     if (isPopupMode) return
 
     if (wsSystemErrorRef.current) {
@@ -510,6 +511,7 @@ const DynamicVoiceChat = ({
       }
 
       if (data?.event === env.WS_IDLE_TIMEOUT_EVENT() && data?.source === env.WS_IDLE_TIMEOUT_SOURCE()) {
+        setShowProfileModal(false)
         markIntentionalCloseRef.current()
         setTimeout(() => resetIntentionalCloseRef.current(), 500)
         onFinalReconnectAttempt()
@@ -1995,6 +1997,7 @@ const DynamicVoiceChat = ({
     try {
       await validateToken()
     } catch (error) {
+      setShowProfileModal(false)
       console.error("Session validation failed before profile update:", error)
       return
     }

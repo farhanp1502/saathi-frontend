@@ -210,6 +210,18 @@ function UserProfileModal({
         {/* Scrollable form body */}
         <div className="px-4 sm:px-6 py-4 sm:py-5 overflow-y-auto flex-1">
           {formFields.map(field => renderField(field))}
+          {isSubmitDisabled && (
+            <div className="mt-2 sm:mt-3 flex items-center gap-2.5 sm:gap-3 px-3.5 sm:px-4 py-2.5 sm:py-3 bg-[#eeecff] rounded-2xl">
+              <img
+                src="/assets/info_badge.png"
+                alt="Info"
+                className="w-5 h-5 sm:w-6 sm:h-6 object-contain flex-shrink-0"
+              />
+              <span className="text-xs sm:text-sm font-medium text-[#221f25]">
+                {t("pleaseFillRequiredFields")}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
@@ -242,4 +254,5 @@ function UserProfileModal({
   )
 }
 
+export { useProfileModalStore, setShowProfileModal } from "utils/profileModal"
 export default UserProfileModal

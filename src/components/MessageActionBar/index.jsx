@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { FiCopy, FiThumbsUp, FiThumbsDown } from "react-icons/fi"
 import { showNotification } from "components/ToastMessage/TotastMessage"
 import FeedbackModal, { resolveValidCompanyChatId } from "components/FeedbackModal"
-import { DEFAULT_WEB_LOGO, FEEDBACK_TYPE, DESELECT_FEEDBACK_PAYLOAD } from "constants/dynamic-chat"
+import { DEFAULT_SOURCE_LOGO, FEEDBACK_TYPE, DESELECT_FEEDBACK_PAYLOAD } from "constants/dynamic-chat"
 import { submitChatFeedbackApi } from "api/endpoints/feedback"
 import { useChatStorage } from "hooks/useStorage"
 // SourcesPanel is now imported and rendered at the top-level DynamicVoiceChat component to allow layout squeezing
@@ -167,7 +167,7 @@ function MessageActionBar({
           >
             <div className="msg-action-logos-container">
             <img
-              src={DEFAULT_WEB_LOGO}
+              src={DEFAULT_SOURCE_LOGO}
                 alt="Source logo"
               className="msg-action-logo"
             />

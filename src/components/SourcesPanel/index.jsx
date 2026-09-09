@@ -1,13 +1,6 @@
 import React, { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { RxCross2 } from "react-icons/rx"
-import { FiGlobe } from "react-icons/fi"
-import { BiLibrary } from "react-icons/bi"
-import { SOURCE_TYPE, DEFAULT_KB_LOGO, DEFAULT_WEB_LOGO } from "constants/dynamic-chat"
-
-function getSourceIcon() {
-  return <img src={DEFAULT_WEB_LOGO} className="source-item-logo" alt="Source logo" />
-}
 
 function SourceIcon({ src }) {
   const [imgError, setImgError] = useState(false)
@@ -21,7 +14,7 @@ function SourceIcon({ src }) {
       />
     )
   }
-  return getSourceIcon()
+  return null
 }
 
 function isValidUrl(urlString) {

@@ -68,5 +68,6 @@
     "badResponse": "खराब प्रतिक्रिया",
     "sources": "स्रोत",
     "close": "बंद करें",
-    "noSources": "कोई स्रोत उपलब्ध नहीं है।"
+    "noSources": "कोई स्रोत उपलब्ध नहीं है।",
+    "pleaseFillRequiredFields": "कृपया सभी आवश्यक फ़ील्ड भरें।"
 }

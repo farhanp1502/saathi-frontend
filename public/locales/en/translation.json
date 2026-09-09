@@ -68,5 +68,6 @@
     "badResponse": "Bad response",
     "sources": "Sources",
     "close": "Close",
-    "noSources": "No sources available."
+    "noSources": "No sources available.",
+    "pleaseFillRequiredFields": "Please fill all required field(s)."
 }
