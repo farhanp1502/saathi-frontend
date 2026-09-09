@@ -2652,14 +2652,14 @@ const DynamicVoiceChat = ({
                   }, 300)
                 }}
                 onKeyDown={e => {
-                  if (e.key === "Enter") {
-                    if (e.shiftKey) {
-                      e.preventDefault()
-                      if (checkIsOffline()) return
-                      e.target.form.requestSubmit()
-                      setTimeout(() => {
-                        e.target.value = ""
-                      }, 0)
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    if (e.nativeEvent?.isComposing) return
+                    if (checkIsOffline()) return
+                    if (!textMessage?.trim()) return
+                    e.target.form?.requestSubmit()
+                    if (textAreaRef.current) {
+                      textAreaRef.current.style.height = "auto"
                     }
                   }
                 }}
